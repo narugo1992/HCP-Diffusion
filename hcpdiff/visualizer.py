@@ -10,15 +10,15 @@ from accelerate import infer_auto_device_map, dispatch_model
 from diffusers.utils.import_utils import is_xformers_available
 from hcpdiff.models import TokenizerHook, LoraBlock
 from hcpdiff.models.compose import ComposeTEEXHook, ComposeEmbPTHook, ComposeTextEncoder
-from hcpdiff.utils.cfg_net_tools import load_hcpdiff, make_plugin
+from hcpdiff.utils.cfg_net_tools import HCPModelLoader, make_plugin
 from hcpdiff.utils.net_utils import to_cpu, to_cuda, auto_tokenizer, auto_text_encoder
 from hcpdiff.utils.pipe_hook import HookPipe_T2I, HookPipe_I2I, HookPipe_Inpaint
-from hcpdiff.utils.utils import load_config_with_cli, load_config, size_to_int, int_to_size, prepare_seed
+from hcpdiff.utils.utils import load_config_with_cli, load_config, size_to_int, int_to_size, prepare_seed, is_list, pad_attn_bias
 from omegaconf import OmegaConf
 from torch.cuda.amp import autocast
 
 class Visualizer:
-    dtype_dict = {'fp32':torch.float32, 'amp':torch.float32, 'fp16':torch.float16, 'bf16':torch.bfloat16}
+    dtype_dict = {'fp32':torch.float32, 'fp16':torch.float16, 'bf16':torch.bfloat16}
 
     def __init__(self, cfgs):
         self.cfgs_raw = cfgs
@@ -47,11 +47,11 @@ class Visualizer:
 
     def load_model(self, pretrained_model):
         pipeline = self.get_pipeline()
-        te = auto_text_encoder(pretrained_model).from_pretrained(pretrained_model, subfolder="text_encoder", torch_dtype=self.dtype)
-        tokenizer = auto_tokenizer(pretrained_model).from_pretrained(pretrained_model, subfolder="tokenizer", use_fast=False)
+        te = auto_text_encoder(pretrained_model, subfolder="text_encoder", torch_dtype=self.dtype, resume_download=True)
+        tokenizer = auto_tokenizer(pretrained_model, subfolder="tokenizer", use_fast=False)
 
         return pipeline.from_pretrained(pretrained_model, safety_checker=None, requires_safety_checker=False,
-                                        text_encoder=te, tokenizer=tokenizer,
+                                        text_encoder=te, tokenizer=tokenizer, resume_download=True,
                                         torch_dtype=self.dtype, **self.cfgs.new_components)
 
     def build_optimize(self):
@@ -70,7 +70,7 @@ class Visualizer:
         self.emb_hook, _ = ComposeEmbPTHook.hook_from_dir(self.cfgs.emb_dir, self.pipe.tokenizer, self.pipe.text_encoder,
                                                           N_repeats=self.cfgs.N_repeats)
         self.te_hook = ComposeTEEXHook.hook_pipe(self.pipe, N_repeats=self.cfgs.N_repeats, clip_skip=self.cfgs.clip_skip,
-                                                 clip_final_norm=self.cfgs.clip_final_norm)
+                                                 clip_final_norm=self.cfgs.clip_final_norm, use_attention_mask=self.cfgs.encoder_attention_mask)
         self.token_ex = TokenizerHook(self.pipe.tokenizer)
 
         if is_xformers_available():
@@ -139,7 +139,7 @@ class Visualizer:
 
         def vae_encode_offload(x, return_dict=True, encode_raw=self.pipe.vae.encode):
             to_cuda(self.pipe.vae)
-            res = encode_raw(x, return_dict=return_dict)
+            res = encode_raw(x.to(dtype=self.pipe.vae.dtype), return_dict=return_dict)
             to_cpu(self.pipe.vae)
             return res
 
@@ -148,18 +148,21 @@ class Visualizer:
     def merge_model(self):
         if 'plugin_cfg' in self.cfg_merge:  # Build plugins
             if isinstance(self.cfg_merge.plugin_cfg, str):
-                plugin_cfg = hydra.utils.instantiate(load_config(self.cfg_merge.plugin_cfg))
+                plugin_cfg = load_config(self.cfg_merge.plugin_cfg)
+                plugin_cfg = {'plugin_unet': hydra.utils.instantiate(plugin_cfg['plugin_unet']),
+                              'plugin_TE': hydra.utils.instantiate(plugin_cfg['plugin_TE'])}
             else:
                 plugin_cfg = self.cfg_merge.plugin_cfg
-            make_plugin(self.pipe.unet, plugin_cfg.plugin_unet)
-            make_plugin(self.pipe.text_encoder, plugin_cfg.plugin_TE)
+            make_plugin(self.pipe.unet, plugin_cfg['plugin_unet'])
+            make_plugin(self.pipe.text_encoder, plugin_cfg['plugin_TE'])
 
+        load_ema = self.cfg_merge.get('load_ema', False)
         for cfg_group in self.cfg_merge.values():
             if hasattr(cfg_group, 'type'):
                 if cfg_group.type == 'unet':
-                    load_hcpdiff(self.pipe.unet, cfg_group)
+                    HCPModelLoader(self.pipe.unet).load_all(cfg_group, load_ema=load_ema)
                 elif cfg_group.type == 'TE':
-                    load_hcpdiff(self.pipe.text_encoder, cfg_group)
+                    HCPModelLoader(self.pipe.text_encoder).load_all(cfg_group, load_ema=load_ema)
 
     def set_scheduler(self, scheduler):
         self.pipe.scheduler = scheduler
@@ -189,8 +192,12 @@ class Visualizer:
 
         mult_p, clean_text_p = self.token_ex.parse_attn_mult(prompt)
         mult_n, clean_text_n = self.token_ex.parse_attn_mult(negative_prompt)
-        with autocast(enabled=self.cfgs.dtype == 'amp'):
-            emb, pooled_output = self.te_hook.encode_prompt_to_emb(clean_text_n+clean_text_p)
+        with autocast(enabled=self.cfgs.amp, dtype=self.dtype):
+            emb, pooled_output, attention_mask = self.te_hook.encode_prompt_to_emb(clean_text_n+clean_text_p)
+            if self.cfgs.encoder_attention_mask:
+                emb, attention_mask = pad_attn_bias(emb, attention_mask)
+            else:
+                attention_mask = None
             emb_n, emb_p = emb.chunk(2)
             emb_p = self.te_hook.mult_attn(emb_p, mult_p)
             emb_n = self.te_hook.mult_attn(emb_n, mult_n)
@@ -203,7 +210,7 @@ class Visualizer:
                     feeder(ex_input_dict)
 
             images = self.pipe(prompt_embeds=emb_p, negative_prompt_embeds=emb_n, callback=self.inter_callback, generator=G,
-                               pooled_output=pooled_output[-1], **kwargs).images
+                               pooled_output=pooled_output[-1], encoder_attention_mask=attention_mask, **kwargs).images
         return images
 
     def inter_callback(self, i, t, num_t, latents):
@@ -235,7 +242,7 @@ if __name__ == '__main__':
     cfgs = load_config_with_cli(args.cfg, args_list=cfg_args)  # skip --cfg
 
     if cfgs.seed is not None:
-        if OmegaConf.is_list(cfgs.seed) or isinstance(cfgs.seed, list):
+        if is_list(cfgs.seed):
             assert len(cfgs.seed) == cfgs.num*cfgs.bs, 'seed list length should be equal to num*bs'
             seeds = list(cfgs.seed)
         else:
@@ -245,7 +252,7 @@ if __name__ == '__main__':
 
     viser = Visualizer(cfgs)
     for i in range(cfgs.num):
-        prompt = cfgs.prompt[i*cfgs.bs:(i+1)*cfgs.bs] if isinstance(cfgs.prompt, list) else [cfgs.prompt]*cfgs.bs
-        negative_prompt = cfgs.neg_prompt[i*cfgs.bs:(i+1)*cfgs.bs] if isinstance(cfgs.neg_prompt, list) else [cfgs.neg_prompt]*cfgs.bs
+        prompt = cfgs.prompt[i*cfgs.bs:(i+1)*cfgs.bs] if is_list(cfgs.prompt) else [cfgs.prompt]*cfgs.bs
+        negative_prompt = cfgs.neg_prompt[i*cfgs.bs:(i+1)*cfgs.bs] if is_list(cfgs.neg_prompt) else [cfgs.neg_prompt]*cfgs.bs
         viser.vis_to_dir(prompt=prompt, negative_prompt=negative_prompt,
                          seeds=seeds[i*cfgs.bs:(i+1)*cfgs.bs], save_cfg=cfgs.save.save_cfg, **cfgs.infer_args)

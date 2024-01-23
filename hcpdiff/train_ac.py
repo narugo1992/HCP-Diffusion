@@ -37,7 +37,7 @@ from hcpdiff.models.compose import ComposeEmbPTHook, ComposeTEEXHook
 from hcpdiff.models.compose import SDXLTextEncoder
 from hcpdiff.utils.cfg_net_tools import make_hcpdiff, make_plugin
 from hcpdiff.utils.ema import ModelEMA
-from hcpdiff.utils.net_utils import get_scheduler, auto_tokenizer, auto_text_encoder, load_emb
+from hcpdiff.utils.net_utils import get_scheduler, auto_tokenizer_cls, auto_text_encoder_cls, load_emb
 from hcpdiff.utils.utils import load_config_with_cli, get_cfg_range, mgcd, format_number
 from hcpdiff.visualizer import Visualizer
 
@@ -69,8 +69,6 @@ class Trainer:
         assert len(cfgs.data)>0, "At least one dataset is need."
         loss_weights = [dataset.keywords['loss_weight'] for name, dataset in cfgs.data.items()]
         self.train_loader_group = DataGroup([self.build_data(dataset) for name, dataset in cfgs.data.items()], loss_weights)
-
-        self.TE_unet.freeze_model()
 
         if self.cache_latents:
             self.vae = self.vae.to('cpu')
@@ -202,7 +200,7 @@ class Trainer:
         if self.cfgs.model.get('tokenizer', None) is not None:
             self.tokenizer = self.cfgs.model.tokenizer
         else:
-            tokenizer_cls = auto_tokenizer(self.cfgs.model.pretrained_model_name_or_path, self.cfgs.model.revision)
+            tokenizer_cls = auto_tokenizer_cls(self.cfgs.model.pretrained_model_name_or_path, self.cfgs.model.revision)
             self.tokenizer = tokenizer_cls.from_pretrained(
                 self.cfgs.model.pretrained_model_name_or_path, subfolder="tokenizer",
                 revision=self.cfgs.model.revision, use_fast=False,
@@ -227,7 +225,7 @@ class Trainer:
             text_encoder_cls = type(text_encoder)
         else:
             # import correct text encoder class
-            text_encoder_cls = auto_text_encoder(self.cfgs.model.pretrained_model_name_or_path, self.cfgs.model.revision)
+            text_encoder_cls = auto_text_encoder_cls(self.cfgs.model.pretrained_model_name_or_path, self.cfgs.model.revision)
             text_encoder = text_encoder_cls.from_pretrained(
                 self.cfgs.model.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.cfgs.model.revision
             )
@@ -237,10 +235,10 @@ class Trainer:
         self.TE_unet = wrapper_cls(unet, text_encoder, train_TE=self.train_TE)
 
     def build_ema(self):
-        if self.cfgs.model.ema_unet>0:
-            self.ema_unet = ModelEMA(self.TE_unet.unet.named_parameters(), self.cfgs.model.ema_unet)
-        if self.train_TE and self.cfgs.model.ema_text_encoder>0:
-            self.ema_text_encoder = ModelEMA(self.TE_unet.TE.named_parameters(), self.cfgs.model.ema_text_encoder)
+        if self.cfgs.model.ema is not None:
+            self.ema_unet = self.cfgs.model.ema(self.TE_unet.unet)
+            if self.train_TE:
+                self.ema_text_encoder = self.cfgs.model.ema(self.TE_unet.TE)
 
     def build_ckpt_manager(self):
         self.ckpt_manager = self.ckpt_manager_map[self.cfgs.ckpt_type]()
@@ -447,12 +445,12 @@ class Trainer:
         # (this is the forward diffusion process)
         return self.noise_scheduler.add_noise(latents, noise, timesteps), noise, timesteps
 
-    def forward(self, latents, prompt_ids, **kwargs):
+    def forward(self, latents, prompt_ids, attn_mask=None, position_ids=None, **kwargs):
         noisy_latents, noise, timesteps = self.make_noise(latents)
 
         # CFG context for DreamArtist
         noisy_latents, timesteps = self.cfg_context.pre(noisy_latents, timesteps)
-        model_pred = self.TE_unet(prompt_ids, noisy_latents, timesteps, **kwargs)
+        model_pred = self.TE_unet(prompt_ids, noisy_latents, timesteps, attn_mask=attn_mask, position_ids=position_ids, **kwargs)
         model_pred = self.cfg_context.post(model_pred)
 
         # Get the target for loss depending on the prediction type
@@ -469,15 +467,17 @@ class Trainer:
         with self.accelerator.accumulate(self.TE_unet):
             for idx, data in enumerate(data_list):
                 image = data.pop('img').to(self.device, dtype=self.weight_dtype)
-                att_mask = data.pop('mask').to(self.device) if 'mask' in data else None
+                img_mask = data.pop('mask').to(self.device) if 'mask' in data else None
                 prompt_ids = data.pop('prompt').to(self.device)
-                other_datas = {k:v.to(self.device, dtype=self.weight_dtype) for k, v in data.items() if k!='plugin_input'}
+                attn_mask = data.pop('attn_mask').to(self.device) if 'attn_mask' in data else None
+                position_ids = data.pop('position_ids').to(self.device) if 'position_ids' in data else None
+                other_datas = {k:v.to(self.device) for k, v in data.items() if k!='plugin_input'}
                 if 'plugin_input' in data:
                     other_datas['plugin_input'] = {k:v.to(self.device, dtype=self.weight_dtype) for k, v in data['plugin_input'].items()}
 
                 latents = self.get_latents(image, self.train_loader_group.get_dataset(idx))
-                model_pred, target, timesteps = self.forward(latents, prompt_ids, **other_datas)
-                loss = self.get_loss(model_pred, target, timesteps, att_mask)*self.train_loader_group.get_loss_weights(idx)
+                model_pred, target, timesteps = self.forward(latents, prompt_ids, attn_mask, position_ids, **other_datas)
+                loss = self.get_loss(model_pred, target, timesteps, img_mask)*self.train_loader_group.get_loss_weights(idx)
                 self.accelerator.backward(loss)
 
             if hasattr(self, 'optimizer'):
@@ -498,7 +498,8 @@ class Trainer:
                     self.lr_scheduler_pt.step()
                 self.optimizer_pt.zero_grad(set_to_none=self.cfgs.train.set_grads_to_none)
 
-            self.update_ema()
+            if self.accelerator.sync_gradients:
+                self.update_ema()
         return loss.item()
 
     def get_loss(self, model_pred, target, timesteps, att_mask):
@@ -514,9 +515,9 @@ class Trainer:
 
     def update_ema(self):
         if hasattr(self, 'ema_unet'):
-            self.ema_unet.step(self.unet_raw.named_parameters())
+            self.ema_unet.update(self.unet_raw)
         if hasattr(self, 'ema_text_encoder'):
-            self.ema_text_encoder.step(self.TE_raw.named_parameters())
+            self.ema_text_encoder.update(self.TE_raw)
 
     def save_model(self, from_raw=False):
         unet_raw = self.unet_raw
