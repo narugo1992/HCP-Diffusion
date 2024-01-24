@@ -36,11 +36,12 @@ class LoraConverter:
 
     def convert_to_webui(self, sd_unet, sd_TE, auto_scale_alpha=False, sdxl=False):
         sd_unet = self.convert_to_webui_(sd_unet, prefix=self.prefix_unet)
-        if sdxl:
-            sd_TE = self.convert_to_webui_xl_(sd_TE, prefix=self.prefix_TE)
-        else:
-            sd_TE = self.convert_to_webui_(sd_TE, prefix=self.prefix_TE)
-        sd_unet.update(sd_TE)
+        if sd_TE:
+            if sdxl:
+                sd_TE = self.convert_to_webui_xl_(sd_TE, prefix=self.prefix_TE)
+            else:
+                sd_TE = self.convert_to_webui_(sd_TE, prefix=self.prefix_TE)
+            sd_unet.update(sd_TE)
         if auto_scale_alpha:
             sd_unet = self.alpha_scale_to_webui(sd_unet)
         return sd_unet
@@ -233,11 +234,21 @@ if __name__ == '__main__':
         unet_path = os.path.join(args.dump_path, 'unet-'+lora_name)
         ckpt_manager._save_ckpt(sd_TE, save_path=TE_path)
         ckpt_manager._save_ckpt(sd_unet, save_path=unet_path)
+        # TODO(7eu7d7): add support for unet-only LoRA
         print('save text encoder lora to:', TE_path)
         print('save unet lora to:', unet_path)
+
     elif args.to_webui:
         sd_unet = ckpt_manager.load_ckpt(args.lora_path)
-        sd_TE = ckpt_manager.load_ckpt(args.lora_path_TE)
-        state = converter.convert_to_webui(sd_unet['lora'], sd_TE['lora'], auto_scale_alpha=args.auto_scale_alpha, sdxl=args.sdxl)
+        if args.lora_path_TE:
+            sd_TE = ckpt_manager.load_ckpt(args.lora_path_TE)
+        else:
+            sd_TE = None
+        state = converter.convert_to_webui(
+            sd_unet=sd_unet['lora'],
+            sd_TE=sd_TE['lora'] if sd_TE is not None else None,
+            auto_scale_alpha=args.auto_scale_alpha,
+            sdxl=args.sdxl,
+        )
         ckpt_manager._save_ckpt(state, save_path=args.dump_path)
         print('save lora to:', args.dump_path)
