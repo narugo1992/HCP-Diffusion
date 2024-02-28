@@ -13,10 +13,22 @@ emb_dir: 'embs/'
 infer_args:
   init_width: 512
   init_height: 768
-  width: 1024
-  height: 1536  # image size
-  guidance_scale: 7.5  # scale, when higher, the images will tend to be more similar
+  width: 832
+  height: 1216  # image size
+  guidance_scale: 7  # scale, when higher, the images will tend to be more similar
   num_inference_steps: 30  # how many steps
+  scheduler: # DPM++ 2M Karras
+    _target_: diffusers.DPMSolverMultistepScheduler
+    beta_start: 0.00085
+    beta_end: 0.012
+    algorithm_type: dpmsolver++
+    beta_schedule: scaled_linear
+    use_karras_sigmas: true
+  vae: # use NAI's vae
+    _target_: diffusers.AutoencoderKL.from_pretrained
+    pretrained_model_name_or_path: deepghs/animefull-latest  # path to vae model
+    subfolder: vae
+
 
 output_dir: 'output/'
 
@@ -26,17 +38,8 @@ prepare:
   - _target_: hcpdiff.workflow.LoadModelsAction
     pretrained_model: ${pretrained_model}
     dtype: ${dtype}
-    scheduler: # DPM++ 2M Karras
-      _target_: diffusers.DPMSolverMultistepScheduler
-      beta_start: 0.00085
-      beta_end: 0.012
-      algorithm_type: dpmsolver++
-      beta_schedule: scaled_linear
-      use_karras_sigmas: true
-    vae: # use NAI's vae
-      _target_: diffusers.AutoencoderKL.from_pretrained
-      pretrained_model_name_or_path: deepghs/animefull-latest  # path to vae model
-      subfolder: vae
+    scheduler: ${infer_args.scheduler}
+    vae: ${infer_args.vae}
   - _target_: hcpdiff.workflow.XformersEnableAction
   - _target_: hcpdiff.workflow.ExecAction
     prog: |-
@@ -89,7 +92,7 @@ actions:
   # only part of timesteps
   - _target_: hcpdiff.workflow.ExecAction
     prog: |-
-      states['timesteps'] = states['timesteps'][int(30*(1-0.6)):]
+      states['timesteps'] = states['timesteps'][int(${infer_args.num_inference_steps}*(1-0.6)):]
       states['start_timestep'] = states['timesteps'][:1]
   - _target_: hcpdiff.workflow.MakeLatentAction
     width: ${infer_args.width}
