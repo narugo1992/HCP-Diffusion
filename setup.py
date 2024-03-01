@@ -1,19 +1,22 @@
-import setuptools
 import os
-import platform
+import re
+
+import setuptools
+
+def _load_req(file: str):
+    with open(file, 'r', encoding='utf-8') as f:
+        return [line.strip() for line in f.readlines() if line.strip()]
 
 with open("README.md", "r", encoding='utf8') as fh:
     long_description = fh.read()
 
-requires = []
-with open('requirements.txt', encoding='utf8') as f:
-    for x in f.readlines():
-        requires.append(f'{x.strip()}')
+requirements = _load_req('requirements.txt')
 
-if platform.system().lower() == 'windows':
-    requires.append('bitsandbytes-windows')
-else:
-    requires.append('bitsandbytes')
+_REQ_PATTERN = re.compile(r'^requirements-(\w+)\.txt$')
+group_requirements = {
+    item.group(1):_load_req(item.group(0))
+    for item in [_REQ_PATTERN.fullmatch(reqpath) for reqpath in os.listdir()] if item
+}
 
 def get_data_files(data_dir, prefix=''):
     file_dict = {}
@@ -23,7 +26,6 @@ def get_data_files(data_dir, prefix=''):
                 file_dict[prefix+root] = []
             file_dict[prefix+root].append(os.path.join(root, name))
     return [(k, v) for k, v in file_dict.items()]
-
 
 setuptools.setup(
     name="hcpdiff",
@@ -49,7 +51,7 @@ setuptools.setup(
     python_requires='>=3.7',
 
     entry_points={
-        'console_scripts': [
+        'console_scripts':[
             'hcpinit = hcpdiff.tools.init_proj:main'
         ]
     },
@@ -59,5 +61,6 @@ setuptools.setup(
         *get_data_files('cfgs', prefix='hcpdiff/'),
     ],
 
-    install_requires=requires
+    install_requires=requirements,
+    extras_require=group_requirements,
 )
