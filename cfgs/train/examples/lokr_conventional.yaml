@@ -27,6 +27,10 @@ plugin_TE:
       - 're:.*self_attn$'
       - 're:.*mlp$'
 
+unet: null
+text_encoder: null
+lora_unet: null
+lora_text_encoder: null
 tokenizer_pt:
   train: null
 
