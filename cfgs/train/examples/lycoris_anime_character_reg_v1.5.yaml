@@ -20,7 +20,7 @@ train:
 
 character_name: tohsaka_rin_fatestaynightufotable
 # if exp_dir is not set, a random time-based directory will be used
-exp_dir: 'exps/tohsaka_rin_t4_r1_w1_p0.3_initc_dunet0.01_note_720br'
+exp_dir: 'exps/lokr_tohsaka_rin_t4_r1_w1_p0.3_initc_dunet0.01_note_720br'
 
 dataset:
   dir: '/nfs3/lora_datasets/tohsaka_rin_fatestaynightufotable'
