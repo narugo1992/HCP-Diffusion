@@ -34,7 +34,7 @@ pt:
   emb_dir: 'embs/'
 unet_:
   lr: 1e-4
-  rank: 0.01
+  rank: 8
 text_encoder_:
   lr: 1e-5
   rank: 4
