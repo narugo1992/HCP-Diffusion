@@ -25,9 +25,9 @@ train:
   gradient_accumulation_steps: 1
   save_step: 100
 
+  scale_lr: false
   scheduler:
     name: 'constant_with_warmup'
-    scale_lr: false
     num_warmup_steps: 50
     num_training_steps: 1000
 
