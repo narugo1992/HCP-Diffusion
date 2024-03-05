@@ -111,11 +111,13 @@ prepare:
     model: TE
     cfg:
       lokr:
+        scale: ${lokr.alpha}
         path: ${lokr.text_encoder}
   - _target_: hcpdiff.workflow.LoadPluginAction
     model: unet
     cfg:
       lokr:
+        scale: ${lokr.alpha}
         path: ${lokr.unet}
 
   - _target_: hcpdiff.workflow.XformersEnableAction
