@@ -2,20 +2,27 @@ dtype: fp16
 bs: 1
 seed: 42
 
-pretrained_model: 'KBlueLeaf/kohaku-xl-beta7.1'
+pretrained_model: 'KBlueLeaf/Kohaku-XL-Delta'
 prompt: '1girl loli loli solo wings dragon-horns dragon-wings cup red-hair purple-eyes sitting crossed-legs flower teacup looking-at-viewer red-flower white-dress dress one-side-up small-breasts holding breasts barefoot table navel stomach underboob bare-shoulders holding-cup short-hair bangs teapot sleeveless-dress cloudy-sky river forest tree sunset expressionless smile sideboob'
 neg_prompt: 'bad-anatomy watermarks text blurry'
 N_repeats: 3
 
-clip_skip: 1 #动漫模型通常会跳过一个CLIP层
+clip_skip: 0 #动漫模型通常会跳过一个CLIP层
 
 infer_args:
-  init_width: 576
-  init_height: 960
-  width: 1152
-  height: 1920  # image size
+  init_width: 598
+  init_height: 896
+  width: 896
+  height: 1344  # image size
   guidance_scale: 5  # scale, when higher, the images will tend to be more similar
   num_inference_steps: 20  # how many steps
+  scheduler: # DPM++ 2M Karras
+    _target_: diffusers.DPMSolverMultistepScheduler
+    beta_start: 0.00085
+    beta_end: 0.012
+    algorithm_type: dpmsolver++
+    beta_schedule: scaled_linear
+    use_karras_sigmas: true
 
 output_dir: 'output/'
 
@@ -25,17 +32,7 @@ prepare:
   - _target_: hcpdiff.workflow.LoadModelsAction
     pretrained_model: ${pretrained_model}
     dtype: ${dtype}
-    scheduler: # DPM++ 2M Karras
-      _target_: diffusers.DPMSolverMultistepScheduler
-      beta_start: 0.00085
-      beta_end: 0.012
-      algorithm_type: dpmsolver++
-      beta_schedule: scaled_linear
-      use_karras_sigmas: true
-    vae: # use NAI's vae
-      _target_: diffusers.AutoencoderKL.from_pretrained
-      pretrained_model_name_or_path: stabilityai/stable-diffusion-xl-base-1.0  # path to vae model
-      subfolder: vae
+    scheduler: ${infer_args.scheduler}
   - _target_: hcpdiff.workflow.XformersEnableAction
   - _target_: hcpdiff.workflow.ExecAction
     prog: |-
@@ -86,7 +83,7 @@ actions:
   # only part of timesteps
   - _target_: hcpdiff.workflow.ExecAction
     prog: |-
-      states['timesteps'] = states['timesteps'][int(30*(1-0.6)):]
+      states['timesteps'] = states['timesteps'][int(${infer_args.num_inference_steps}*(1-0.6)):]
       states['start_timestep'] = states['timesteps'][:1]
   - _target_: hcpdiff.workflow.MakeLatentAction
     width: ${infer_args.width}
