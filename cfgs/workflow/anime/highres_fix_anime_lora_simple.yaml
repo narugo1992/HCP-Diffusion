@@ -78,13 +78,13 @@ prepare:
 
   # load lora
   - _target_: hcpdiff.workflow.LoadLoraAction
-    name: lora
+    name: lora_te
     model: 'TE'
     cfg:
       - path: ${lora.text_encoder}
         alpha: ${lora.alpha}
   - _target_: hcpdiff.workflow.LoadLoraAction
-    name: lora
+    name: lora_unet
     model: 'unet'
     cfg:
       - path: ${lora.unet}
