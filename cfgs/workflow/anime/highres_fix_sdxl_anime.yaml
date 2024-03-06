@@ -1,13 +1,15 @@
 dtype: fp16
+amp: fp16
 bs: 1
 seed: 42
 
 pretrained_model: 'KBlueLeaf/Kohaku-XL-Delta'
-prompt: '1girl loli loli solo wings dragon-horns dragon-wings cup red-hair purple-eyes sitting crossed-legs flower teacup looking-at-viewer red-flower white-dress dress one-side-up small-breasts holding breasts barefoot table navel stomach underboob bare-shoulders holding-cup short-hair bangs teapot sleeveless-dress cloudy-sky river forest tree sunset expressionless smile sideboob'
-neg_prompt: 'bad-anatomy watermarks text blurry'
+prompt: '1girl, (fukuro daizi:1.1), kz oji, (henreader:0.9), (ask \(askzy\), aki99, ama mitsuki, ciloranko:0.9), kaede \(sayappa\), masterpiece, newest, absurdres, solo, dragon girl, dragon tail, dragon wings, dragon horns, white dress, long hair, side up, river, tree, forest, pointy ears, 1girl, :3, angel wings, bell, blonde hair, blue background, blue hair, blush, breasts, collarbone, dress, eyes visible through hair, fang, fire, full body, hair between eyes, horns, looking at viewer, nature, off shoulder, open mouth, orange eyes, outdoors, smile, tail, twintails, wings'
+neg_prompt: 'low quality, worst quality, normal quality, text, signature, jpeg artifacts, bad anatomy, old, early, mini skirt, nsfw, chibi'
 N_repeats: 3
 
 clip_skip: 0 #动漫模型通常会跳过一个CLIP层
+emb_dir: 'embs/'
 
 infer_args:
   init_width: 598
@@ -44,6 +46,7 @@ prepare:
       #to_cuda(memory.vae)
   - _target_: hcpdiff.workflow.PrepareDiffusionAction
     dtype: ${dtype}
+    amp: ${amp}
   - _target_: hcpdiff.workflow.VaeOptimizeAction
     slicing: True
 
@@ -51,6 +54,7 @@ actions:
   - _target_: hcpdiff.workflow.TextHookAction # text encoder and tokenizer auto get from memory
     N_repeats: ${N_repeats}
     layer_skip: ${clip_skip}
+    emb_dir: ${emb_dir}
     TE_final_norm: false
 
   # encode text
