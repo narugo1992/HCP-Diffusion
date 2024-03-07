@@ -49,6 +49,7 @@ infer_args:
   guidance_scale: 7  # scale, when higher, the images will tend to be more similar
   num_inference_steps: 30  # how many steps
   hires_inference_steps: 18  # how many steps for highres fix
+  denoising_strength: 0.5
   scheduler: # DPM++ 2M Karras
     _target_: diffusers.DPMSolverMultistepScheduler
     beta_start: 0.00085
@@ -140,7 +141,7 @@ actions:
   - _target_: hcpdiff.workflow.SeedAction
     seed: ${seed}
   - _target_: hcpdiff.workflow.MakeTimestepsAction
-    N_steps: ${infer_args.num_inference_steps}
+    N_steps: ${hcp.eval:"int(${infer_args.hires_inference_steps}/(1.0-${infer_args.denoising_strength}))"}
   # only part of timesteps
   - _target_: hcpdiff.workflow.ExecAction
     prog: |-
