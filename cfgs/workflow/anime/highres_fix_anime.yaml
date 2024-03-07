@@ -18,7 +18,7 @@ infer_args:
   height: 1216  # image size
   guidance_scale: 7  # scale, when higher, the images will tend to be more similar
   num_inference_steps: 30  # how many steps
-  hires_inference_steps: 18  # how many steps for highres fix
+  hires_inference_steps: 20  # how many steps for highres fix
   denoising_strength: 0.5
   scheduler: # DPM++ 2M Karras
     _target_: diffusers.DPMSolverMultistepScheduler
