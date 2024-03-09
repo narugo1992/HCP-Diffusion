@@ -1,4 +1,5 @@
-torch>=2.1.0
+# on cuda 12, torch>=2.1.0, on cuda 11, torch<2.1
+torch>=2
 torchvision>=0.13.0
 accelerate>=0.15.0
 diffusers>=0.22,<=0.26.1
