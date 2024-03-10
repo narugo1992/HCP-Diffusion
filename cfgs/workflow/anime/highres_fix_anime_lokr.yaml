@@ -65,6 +65,11 @@ lokr:
   step: 10000
   text_encoder: ${lokr.dir}/text_encoder-lokr-${lokr.step}.safetensors
   unet: ${lokr.dir}/unet-lokr-${lokr.step}.safetensors
+  train:
+    lr: 2e-4
+    dim: 10000
+    alpha: 0
+    factor: 8
 
 memory: { }
 
@@ -86,10 +91,10 @@ prepare:
         lokr:
           _target_: lycoris.hcp.LokrBlock.wrap_model
           _partial_: True
-          lr: 1e-4
-          dim: 10000
-          alpha: 0
-          factor: 8
+          lr: ${lokr.train.lr}
+          dim: ${lokr.train.dim}
+          alpha: ${lokr.train.alpha}
+          factor: ${lokr.train.factor}
           layers:
             - 're:.*\.attn.?$'
             - 're:.*\.ff$'
@@ -98,10 +103,10 @@ prepare:
         lokr:
           _target_: lycoris.hcp.LokrBlock.wrap_model
           _partial_: True
-          lr: 1e-4
-          dim: 10000
-          alpha: 0
-          factor: 8
+          lr: ${lokr.train.lr}
+          dim: ${lokr.train.dim}
+          alpha: ${lokr.train.alpha}
+          factor: ${lokr.train.factor}
           layers:
             - 're:.*self_attn$'
             - 're:.*mlp$'
