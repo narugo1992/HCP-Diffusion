@@ -7,16 +7,27 @@ model:
   clip_skip: 1
 
 train:
-  lokr:
-    lr: 2e-4
-    dim: 10000
-    alpha: 0
-    factor: 8
   train_steps: 10000
   save_step: 200
+  optimizer:
+    _target_: torch.optim.AdamW
+    _partial_: True
+    weight_decay: 1e-2
   scheduler:
-    num_warmup_steps: 500
+    name: 'one_cycle'
+    num_warmup_steps: 100
     num_training_steps: ${train.train_steps}
+
+unet_:
+  lr: 2e-4
+  dim: 10000
+  alpha: 0
+  factor: 8
+text_encoder_:
+  lr: 1e-4
+  dim: 10000
+  alpha: 0
+  factor: 8
 
 character_name: tohsaka_rin_fatestaynightufotable
 # if exp_dir is not set, a random time-based directory will be used
@@ -46,17 +57,17 @@ tokenizer_pt:
 
 plugin_unet:
   lokr:
-    lr: ${train.lokr.lr}
-    dim: ${train.lokr.dim}
-    alpha: ${train.lokr.alpha}
-    factor: ${train.lokr.factor}
+    lr: ${unet_.lr}
+    dim: ${unet_.dim}
+    alpha: ${unet_.alpha}
+    factor: ${unet_.factor}
 
 plugin_TE:
   lokr:
-    lr: ${train.lokr.lr}
-    dim: ${train.lokr.dim}
-    alpha: ${train.lokr.alpha}
-    factor: ${train.lokr.factor}
+    lr: ${text_encoder_.lr}
+    dim: ${text_encoder_.dim}
+    alpha: ${text_encoder_.alpha}
+    factor: ${text_encoder_.factor}
 
 data:
   dataset1:
