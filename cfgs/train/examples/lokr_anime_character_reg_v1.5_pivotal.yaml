@@ -21,11 +21,6 @@ unet_:
   dim: 10000
   alpha: 0
   factor: 8
-text_encoder_:
-  lr: 1e-4
-  dim: 10000
-  alpha: 0
-  factor: 8
 
 character_name: tohsaka_rin_fatestaynightufotable
 # if exp_dir is not set, a random time-based directory will be used
@@ -47,11 +42,14 @@ reg_dataset:
 tag_dropout: 0.2
 pt:
   emb_dir: 'embs/'
+  lr: 0.03
 
 tokenizer_pt:
   emb_dir: ${pt.emb_dir}
   replace: False
-  train: null
+  train:
+    - name: ${character_name}
+      lr: ${pt.lr}
 
 plugin_unet:
   lokr:
@@ -59,13 +57,6 @@ plugin_unet:
     dim: ${unet_.dim}
     alpha: ${unet_.alpha}
     factor: ${unet_.factor}
-
-plugin_TE:
-  lokr:
-    lr: ${text_encoder_.lr}
-    dim: ${text_encoder_.dim}
-    alpha: ${text_encoder_.alpha}
-    factor: ${text_encoder_.factor}
 
 data:
   dataset1:
