@@ -99,6 +99,8 @@ prepare:
             - 're:.*\.attn.?$'
             - 're:.*\.ff$'
 
+      plugin_TE: null
+
   # after build plugin
   - _target_: hcpdiff.workflow.BuildModelLoaderAction
 
