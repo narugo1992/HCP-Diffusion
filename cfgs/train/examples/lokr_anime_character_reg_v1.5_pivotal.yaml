@@ -57,6 +57,7 @@ plugin_unet:
     dim: ${unet_.dim}
     alpha: ${unet_.alpha}
     factor: ${unet_.factor}
+plugin_TE: null
 
 data:
   dataset1:
